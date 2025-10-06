@@ -106,7 +106,7 @@
       const SIG = { type: "sd-shot-list", version: 2 };
 
       /** @type {Shot[]} */
-      let shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
+      let shots = [{ id: uid(), title: "", positive: "", negative: "" }];
 
       // UI refs
       const listEl = document.getElementById("list");
@@ -285,7 +285,7 @@
         const insertAt = Math.min(Math.max(idx + 1, 0), shots.length);
         shots.splice(insertAt, 0, {
           id: uid(),
-          title: `分镜 ${shots.length + 1}`,
+          title: "",
           positive: "",
           negative: "",
         });
