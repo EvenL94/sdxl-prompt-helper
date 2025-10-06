@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SD 分镜 Prompt 管理器</title>
+    <!-- Tailwind CDN（可移除，UI 仍可用，只是没样式） -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* 防止拖拽时选中文本 */
+      .dragging {
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-neutral-950 text-neutral-100">
+    <main class="mx-auto max-w-4xl px-4 py-8">
+      <header
+        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <h1 class="text-2xl font-semibold tracking-tight">
+          SD 分镜 Prompt 管理器
+        </h1>
+        <div class="flex flex-wrap gap-2">
+          <button
+            id="btnImport"
+            class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
+          >
+            导入 TXT
+          </button>
+          <input
+            id="fileInput"
+            type="file"
+            accept=".txt,application/json,text/plain"
+            class="hidden"
+          />
+          <button
+            id="btnExport"
+            class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
+          >
+            导出 TXT
+          </button>
+          <button
+            id="btnAdd"
+            class="rounded-2xl bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white active:scale-[0.99]"
+          >
+            + 新建分镜
+          </button>
+        </div>
+      </header>
+
+      <p
+        id="status"
+        class="mt-3 text-sm text-emerald-400 hidden"
+        role="status"
+      ></p>
+
+      <div class="mt-4 text-xs text-neutral-500">
+        提示：按住卡片空白处拖拽即可排序；已支持删除按钮。现在可分别编辑
+        <span class="font-semibold text-neutral-300">Positive</span> 与
+        <span class="font-semibold text-neutral-300">Negative</span> Prompt。
+      </div>
+
+      <section id="list" class="mt-4 space-y-6"></section>
+
+      <footer
+        class="mt-10 border-t border-neutral-800 pt-4 text-xs leading-6 text-neutral-400"
+      >
+        <p>
+          导出格式说明（v2）：生成的 <code>.txt</code> 文件为 JSON
+          文本，结构如下：
+        </p>
+        <pre
+          class="mt-2 overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-950 p-3"
+        ><code>{
+  "type": "sd-shot-list",
+  "version": 2,
+  "exportedAt": "ISO8601 时间",
+  "items": [
+    { "title": "分镜 1", "positive": "...", "negative": "..." },
+    { "title": "分镜 2", "positive": "...", "negative": "..." }
+  ]
+}</code></pre>
+        <p class="mt-2">
+          兼容导入旧版 v1（将旧字段 <code>prompt</code> 自动映射为
+          <code>positive</code>）。
+        </p>
+      </footer>
+    </main>
+
+    <script>
+      // --- Types (JSDoc for clarity) ---
+      /**
+       * @typedef {{ id:string, title:string, positive:string, negative:string }} Shot
+       */
+
+      // Helper for unique ids
+      const uid = () =>
+        Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+      // Storage keys
+      const LS_KEY_V2 = "sd-shot-list-v2";
+      const LS_KEY_V1 = "sd-shot-list-v1"; // legacy
+
+      // Export file signature
+      const SIG = { type: "sd-shot-list", version: 2 };
+
+      /** @type {Shot[]} */
+      let shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
+
+      // UI refs
+      const listEl = document.getElementById("list");
+      const statusEl = document.getElementById("status");
+      const fileInputEl = document.getElementById("fileInput");
+      const btnImport = document.getElementById("btnImport");
+      const btnExport = document.getElementById("btnExport");
+      const btnAdd = document.getElementById("btnAdd");
+
+      // --- Load from localStorage ---
+      (function initLoad() {
+        try {
+          const rawV2 = localStorage.getItem(LS_KEY_V2);
+          if (rawV2) {
+            const parsed = JSON.parse(rawV2);
+            if (
+              parsed?.type === SIG.type &&
+              parsed?.version === 2 &&
+              Array.isArray(parsed.items)
+            ) {
+              shots = parsed.items.map((it) => ({
+                id: uid(),
+                title: String(it.title || ""),
+                positive: String(it.positive || ""),
+                negative: String(it.negative || ""),
+              }));
+            }
+          } else {
+            const rawV1 = localStorage.getItem(LS_KEY_V1);
+            if (rawV1) {
+              const parsed = JSON.parse(rawV1);
+              if (
+                parsed?.type === SIG.type &&
+                parsed?.version === 1 &&
+                Array.isArray(parsed.items)
+              ) {
+                shots = parsed.items.map((it) => ({
+                  id: uid(),
+                  title: String(it.title || ""),
+                  positive: String(it.prompt || ""),
+                  negative: "",
+                }));
+              }
+            }
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      })();
+
+      // --- Persist ---
+      function persist() {
+        const payload = {
+          ...SIG,
+          items: shots.map(({ title, positive, negative }) => ({
+            title,
+            positive,
+            negative,
+          })),
+        };
+        try {
+          localStorage.setItem(LS_KEY_V2, JSON.stringify(payload));
+        } catch (e) {
+          /* ignore */
+        }
+      }
+
+      // --- Rendering ---
+      function render() {
+        listEl.innerHTML = "";
+        shots.forEach((shot, index) => {
+          const article = document.createElement("article");
+          article.className =
+            "rounded-2xl border bg-neutral-900/40 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
+          article.setAttribute("draggable", "true");
+          article.dataset.index = String(index);
+          article.title = "拖拽以重新排序";
+          article.style.cursor = "grab";
+
+          // DRAG EVENTS
+          article.addEventListener("dragstart", onDragStart);
+          article.addEventListener("dragover", onDragOver);
+          article.addEventListener("drop", onDrop);
+          article.addEventListener("dragend", onDragEnd);
+          article.addEventListener("dragleave", onDragLeave);
+
+          // Header Row
+          const header = document.createElement("div");
+          header.className = "flex items-center justify-between gap-3";
+          header.innerHTML = `
+            <label class="text-sm text-neutral-300">Title</label>
+            <div class="flex items-center gap-2">
+              <button class="btn-delete rounded-xl border border-neutral-800 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800" title="删除该分镜">删除</button>
+            </div>
+          `;
+          article.appendChild(header);
+
+          const inputTitle = document.createElement("input");
+          inputTitle.className =
+            "mt-2 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700";
+          inputTitle.placeholder = "例如：镜头切入主角面部";
+          inputTitle.value = shot.title;
+          inputTitle.addEventListener("input", (e) => {
+            shots[index].title = e.target.value;
+            persist();
+          });
+          article.appendChild(inputTitle);
+
+          // Positive
+          const posRow = document.createElement("div");
+          posRow.className = "mt-4 flex items-center justify-between";
+          posRow.innerHTML = `<label class="text-sm text-neutral-300">Positive Prompt</label><span class=\"text-xs text-neutral-500\">可多行</span>`;
+          article.appendChild(posRow);
+
+          const taPos = document.createElement("textarea");
+          taPos.className =
+            "mt-2 w-full resize-y rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-neutral-700";
+          taPos.rows = 5;
+          taPos.placeholder =
+            "正向提示词：masterpiece, ultra-detailed, cinematic lighting, ...";
+          taPos.value = shot.positive;
+          taPos.addEventListener("input", (e) => {
+            shots[index].positive = e.target.value;
+            persist();
+          });
+          article.appendChild(taPos);
+
+          // Negative
+          const negRow = document.createElement("div");
+          negRow.className = "mt-4 flex items-center justify-between";
+          negRow.innerHTML = `<label class=\"text-sm text-neutral-300\">Negative Prompt</label><span class=\"text-xs text-neutral-500\">可多行</span>`;
+          article.appendChild(negRow);
+
+          const taNeg = document.createElement("textarea");
+          taNeg.className =
+            "mt-2 w-full resize-y rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-neutral-700";
+          taNeg.rows = 5;
+          taNeg.placeholder = "负向提示词：lowres, bad anatomy, blurry, ...";
+          taNeg.value = shot.negative;
+          taNeg.addEventListener("input", (e) => {
+            shots[index].negative = e.target.value;
+            persist();
+          });
+          article.appendChild(taNeg);
+
+          // Actions
+          const actionRow = document.createElement("div");
+          actionRow.className =
+            "mt-4 flex flex-wrap items-center justify-between gap-3";
+
+          const btnAddBelow = document.createElement("button");
+          btnAddBelow.className =
+            "rounded-xl bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-white active:scale-[0.99]";
+          btnAddBelow.textContent = "+ 在下方添加分镜";
+          btnAddBelow.addEventListener("click", () => addShotAfter(index));
+
+          const indexTag = document.createElement("div");
+          indexTag.className = "text-xs text-neutral-500";
+          indexTag.textContent = `#${index + 1}`;
+
+          actionRow.appendChild(btnAddBelow);
+          actionRow.appendChild(indexTag);
+          article.appendChild(actionRow);
+
+          // delete
+          header
+            .querySelector(".btn-delete")
+            .addEventListener("click", () => removeShot(index));
+
+          listEl.appendChild(article);
+        });
+      }
+
+      // --- CRUD ---
+      function addShotAfter(idx) {
+        const insertAt = Math.min(Math.max(idx + 1, 0), shots.length);
+        shots.splice(insertAt, 0, {
+          id: uid(),
+          title: `分镜 ${shots.length + 1}`,
+          positive: "",
+          negative: "",
+        });
+        persist();
+        render();
+      }
+
+      function addShotToEnd() {
+        addShotAfter(shots.length - 1);
+      }
+
+      function removeShot(idx) {
+        if (shots.length <= 1) return;
+        shots = shots.filter((_, i) => i !== idx);
+        persist();
+        render();
+      }
+
+      function reorder(from, to) {
+        if (
+          from === to ||
+          from < 0 ||
+          to < 0 ||
+          from >= shots.length ||
+          to >= shots.length
+        )
+          return;
+        const arr = shots.slice();
+        const [moved] = arr.splice(from, 1);
+        arr.splice(to, 0, moved);
+        shots = arr;
+        persist();
+        render();
+      }
+
+      // --- Drag n Drop Handlers ---
+      let dragIndex = null;
+
+      function onDragStart(e) {
+        dragIndex = Number(e.currentTarget.dataset.index);
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(dragIndex));
+        e.currentTarget.classList.add(
+          "dragging",
+          "border-emerald-400/60",
+          "ring-2",
+          "ring-emerald-400/40"
+        );
+      }
+
+      function onDragOver(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const overIndex = Number(e.currentTarget.dataset.index);
+        if (dragIndex !== null && dragIndex !== overIndex) {
+          e.currentTarget.classList.add(
+            "ring-1",
+            "ring-emerald-400/30",
+            "border-emerald-400/40"
+          );
+        }
+      }
+
+      function onDrop(e) {
+        e.preventDefault();
+        const from = dragIndex ?? Number(e.dataTransfer.getData("text/plain"));
+        const to = Number(e.currentTarget.dataset.index);
+        clearDragClasses();
+        if (!Number.isNaN(from) && !Number.isNaN(to)) reorder(from, to);
+        dragIndex = null;
+      }
+
+      function onDragEnd(e) {
+        clearDragClasses();
+        dragIndex = null;
+      }
+      function onDragLeave(e) {
+        e.currentTarget.classList.remove(
+          "ring-1",
+          "ring-emerald-400/30",
+          "border-emerald-400/40"
+        );
+      }
+      function clearDragClasses() {
+        document.querySelectorAll("article[draggable]").forEach((el) => {
+          el.classList.remove(
+            "dragging",
+            "border-emerald-400/60",
+            "ring-2",
+            "ring-emerald-400/40",
+            "ring-1",
+            "ring-emerald-400/30",
+            "border-emerald-400/40"
+          );
+        });
+      }
+
+      // --- Import / Export ---
+      function showStatus(text) {
+        statusEl.textContent = text;
+        statusEl.classList.remove("hidden");
+        setTimeout(() => statusEl.classList.add("hidden"), 2500);
+      }
+
+      function doExport() {
+        const payload = {
+          ...SIG,
+          exportedAt: new Date().toISOString(),
+          items: shots.map(({ title, positive, negative }) => ({
+            title,
+            positive,
+            negative,
+          })),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+          type: "text/plain;charset=utf-8",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const d = new Date();
+        const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}-${String(d.getDate()).padStart(2, "0")}`;
+        a.href = url;
+        a.download = `sd-shot-list-${stamp}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showStatus("已导出为 .txt（JSON v2 格式）。");
+      }
+
+      function doImport(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const text = String(reader.result || "");
+            const parsed = JSON.parse(text);
+            if (
+              !parsed ||
+              parsed.type !== SIG.type ||
+              !Array.isArray(parsed.items)
+            )
+              throw new Error("导入的文件不是有效的 sd-shot-list 格式");
+            let next = [];
+            if (parsed.version === 2) {
+              next = parsed.items.map((it) => ({
+                id: uid(),
+                title: String(it.title || ""),
+                positive: String(it.positive || ""),
+                negative: String(it.negative || ""),
+              }));
+            } else if (parsed.version === 1) {
+              next = parsed.items.map((it) => ({
+                id: uid(),
+                title: String(it.title || ""),
+                positive: String(it.prompt || ""),
+                negative: "",
+              }));
+            } else {
+              throw new Error("不支持的版本号");
+            }
+            if (!next.length) throw new Error("导入内容为空");
+            shots = next;
+            persist();
+            render();
+            showStatus(
+              `已导入 ${next.length} 条分镜（版本 v${parsed.version}），当前内容已覆盖。`
+            );
+          } catch (err) {
+            alert(err?.message || "导入失败：无法解析文件");
+          } finally {
+            fileInputEl.value = "";
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      // --- Wire up header buttons ---
+      btnImport.addEventListener("click", () => fileInputEl.click());
+      fileInputEl.addEventListener("change", (e) => {
+        const f = e.target.files?.[0];
+        if (f) doImport(f);
+      });
+      btnExport.addEventListener("click", doExport);
+      btnAdd.addEventListener("click", () => addShotToEnd());
+
+      // initial render
+      render();
+    </script>
+  </body>
+</html>
