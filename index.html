@@ -4,29 +4,47 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SD 分镜 Prompt 管理器</title>
-    <!-- Tailwind CDN（可移除，UI 仍可用，只是没样式） -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+      :root {
+        --sticky-offset: 80px;
+      }
       html {
         scroll-behavior: smooth;
       }
-      .dragging {
-        opacity: 0.85;
-      }
-      @media (min-width: 1024px) {
-        aside.toc-sticky {
-          position: sticky;
-          top: 1rem;
-          height: calc(100vh - 2rem);
-          overflow: auto;
-        }
-      }
+
       /* 顶部工具栏吸顶 */
       .topbar-sticky {
         position: sticky;
         top: 0;
         z-index: 50;
         backdrop-filter: blur(6px);
+      }
+
+      /* 目录栏固定（左栏） */
+      aside.toc-sticky {
+        position: sticky;
+        top: calc(var(--sticky-offset) + 8px);
+        height: calc(100vh - var(--sticky-offset) - 16px);
+        overflow: auto;
+      }
+
+      /* 分镜卡片在 sticky title 下对齐并留空隙 */
+      article.card {
+        scroll-margin-top: calc(var(--sticky-offset) + 8px);
+      }
+
+      /* TOC 拖拽可视化 */
+      .toc-item[draggable="true"] {
+        cursor: grab;
+      }
+      .toc-item.dragging {
+        opacity: 0.75;
+      }
+      .toc-item.drop-target {
+        outline: 2px dashed rgba(16, 185, 129, 0.6);
+        outline-offset: 2px;
+        border-radius: 8px;
       }
     </style>
   </head>
@@ -83,19 +101,17 @@
       </div>
 
       <div class="mt-3 text-xs text-neutral-500">
-        提示：左侧目录可快速跳转到任意分镜。按住卡片空白处拖拽即可排序；支持删除；支持导入/导出。支持分别编辑
-        <span class="font-semibold text-neutral-300">Positive</span> 与
-        <span class="font-semibold text-neutral-300">Negative</span>
-        Prompt。右下角“↑ 回到顶部”。
+        提示：现在在<strong>左侧目录</strong>拖拽即可排序；点击目录会将分镜卡片对齐到顶部
+        sticky 标题下方并留空隙。
       </div>
 
       <!-- 主体两栏布局 -->
       <div class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[260px,1fr]">
-        <!-- 侧边目录 -->
+        <!-- 侧边目录（固定 + 可拖拽排序） -->
         <aside
           class="toc-sticky rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4"
         >
-          <div class="mb-2 text-sm text-neutral-300">分镜目录</div>
+          <div class="mb-2 text-sm text-neutral-300">分镜目录（拖拽排序）</div>
           <nav id="toc" class="space-y-1 text-sm"></nav>
         </aside>
 
@@ -106,30 +122,26 @@
           <footer
             class="mt-10 border-t border-neutral-800 pt-4 text-xs leading-6 text-neutral-400"
           >
-            <p>
-              导出格式说明（v2）：生成的 <code>.txt</code> 文件为 JSON
-              文本，结构如下：
-            </p>
+            <p>导出格式说明（v2）：生成的 <code>.txt</code> 文件为 JSON：</p>
             <pre
               class="mt-2 overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-950 p-3"
             ><code>{
   "type": "sd-shot-list",
   "version": 2,
-  "exportedAt": "ISO8601 时间",
+  "exportedAt": "ISO8601",
   "items": [
-    { "title": "分镜 1", "positive": "...", "negative": "..." },
-    { "title": "分镜 2", "positive": "...", "negative": "..." }
+    { "title": "分镜 1", "positive": "...", "negative": "..." }
   ]
 }</code></pre>
             <p class="mt-2">
-              兼容导入旧版 v1（将旧字段 <code>prompt</code> 自动映射为
+              兼容导入旧版 v1（将旧字段 <code>prompt</code> 映射为
               <code>positive</code>）。
             </p>
           </footer>
         </main>
       </div>
 
-      <!-- 回到顶部按钮（右下角固定） -->
+      <!-- 回到顶部按钮 -->
       <button
         id="btnTop"
         title="回到顶部"
@@ -140,24 +152,18 @@
     </div>
 
     <script>
-      // --- Types (JSDoc for clarity) ---
       /** @typedef {{ id:string, title:string, positive:string, negative:string }} Shot */
-
-      // Helper for unique ids
       const uid = () =>
         Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-      // Storage keys
       const LS_KEY_V2 = "sd-shot-list-v2";
-      const LS_KEY_V1 = "sd-shot-list-v1"; // legacy
-
-      // Export file signature
+      const LS_KEY_V1 = "sd-shot-list-v1";
       const SIG = { type: "sd-shot-list", version: 2 };
 
       /** @type {Shot[]} */
       let shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
 
-      // UI refs
+      // refs
       const listEl = document.getElementById("list");
       const tocEl = document.getElementById("toc");
       const statusEl = document.getElementById("status");
@@ -168,7 +174,15 @@
       const btnReset = document.getElementById("btnReset");
       const btnTop = document.getElementById("btnTop");
 
-      // --- Load from localStorage ---
+      function computeStickyOffset() {
+        const topbar = document.querySelector(".topbar-sticky");
+        const extraGap = 12;
+        const h = (topbar?.offsetHeight || 0) + extraGap;
+        document.documentElement.style.setProperty("--sticky-offset", h + "px");
+      }
+      window.addEventListener("resize", computeStickyOffset);
+
+      // load
       (function initLoad() {
         try {
           const rawV2 = localStorage.getItem(LS_KEY_V2);
@@ -204,12 +218,9 @@
               }
             }
           }
-        } catch (e) {
-          /* ignore */
-        }
+        } catch {}
       })();
 
-      // --- Persist ---
       function persist() {
         const payload = {
           ...SIG,
@@ -221,38 +232,27 @@
         };
         try {
           localStorage.setItem(LS_KEY_V2, JSON.stringify(payload));
-        } catch (e) {
-          /* ignore */
-        }
+        } catch {}
       }
 
-      // --- Rendering (Content Cards) ---
+      // 渲染列表（已取消卡片拖拽）
       function renderList() {
         listEl.innerHTML = "";
         shots.forEach((shot, index) => {
           const article = document.createElement("article");
           article.className =
-            "rounded-2xl border bg-neutral-900/40 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
-          article.setAttribute("draggable", "true");
+            "card rounded-2xl border bg-neutral-900/40 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
           article.dataset.index = String(index);
-          article.id = `shot-${shot.id}`; // 供目录跳转
-          article.title = "拖拽以重新排序";
-          article.style.cursor = "grab";
+          article.id = `shot-${shot.id}`;
 
-          // DRAG EVENTS
-          article.addEventListener("dragstart", onDragStart);
-          article.addEventListener("dragover", onDragOver);
-          article.addEventListener("drop", onDrop);
-          article.addEventListener("dragend", onDragEnd);
-          article.addEventListener("dragleave", onDragLeave);
-
-          // Header Row
           const header = document.createElement("div");
           header.className = "flex items-center justify-between gap-3";
           header.innerHTML = `
             <label class="text-sm text-neutral-300">Title</label>
             <div class="flex items-center gap-2">
-              <button class="btn-delete rounded-xl border border-neutral-800 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800" title="删除该分镜">删除</button>
+              <button class="btn-delete rounded-xl border px-2 py-1 text-xs font-medium
+                border-red-500/50 text-red-300 bg-red-600/10 hover:bg-red-600/20"
+                title="删除该分镜">删除</button>
             </div>
           `;
           article.appendChild(header);
@@ -269,7 +269,6 @@
           });
           article.appendChild(inputTitle);
 
-          // Positive
           const posRow = document.createElement("div");
           posRow.className = "mt-4 flex items-center justify-between gap-2";
           posRow.innerHTML = `
@@ -292,7 +291,6 @@
           });
           article.appendChild(taPos);
 
-          // Negative
           const negRow = document.createElement("div");
           negRow.className = "mt-4 flex items-center justify-between gap-2";
           negRow.innerHTML = `
@@ -314,7 +312,6 @@
           });
           article.appendChild(taNeg);
 
-          // Actions
           const actionRow = document.createElement("div");
           actionRow.className =
             "mt-4 flex flex-wrap items-center justify-between gap-3";
@@ -333,12 +330,11 @@
           actionRow.appendChild(indexTag);
           article.appendChild(actionRow);
 
-          // delete
           header
             .querySelector(".btn-delete")
             .addEventListener("click", () => removeShot(index));
 
-          // copy buttons (delegate target)
+          // 复制按钮
           article.querySelectorAll(".btn-copy").forEach((btn) => {
             btn.addEventListener("click", async (e) => {
               const targetId = e.currentTarget.getAttribute("data-target");
@@ -349,13 +345,12 @@
                 if (navigator.clipboard?.writeText) {
                   await navigator.clipboard.writeText(text);
                 } else {
-                  // fallback
                   ta.select();
                   document.execCommand("copy");
                   ta.setSelectionRange(ta.value.length, ta.value.length);
                 }
                 toast(`已复制到剪贴板`);
-              } catch (err) {
+              } catch {
                 alert("复制失败");
               }
             });
@@ -365,22 +360,74 @@
         });
       }
 
-      // --- Rendering (TOC) ---
+      // 目录渲染 + 拖拽排序
+      let tocDragIndex = null;
+
       function renderTOC() {
         tocEl.innerHTML = "";
         if (!shots.length) return;
         shots.forEach((shot, i) => {
-          const btn = document.createElement("button");
+          const btn = document.createElement("div");
           btn.className =
-            "w-full text-left rounded-lg px-2 py-1 hover:bg-neutral-800/60 focus:outline-none focus:ring-1 focus:ring-neutral-600";
+            "toc-item w-full rounded-lg px-2 py-1 hover:bg-neutral-800/60 focus:outline-none focus:ring-1 focus:ring-neutral-600 flex items-center gap-2";
+          btn.setAttribute("draggable", "true");
+          btn.dataset.index = String(i);
+
+          const handle = document.createElement("span");
+          handle.className = "text-neutral-500 select-none";
+          handle.textContent = "≡"; // 简单的把手图标
+
+          const label = document.createElement("button");
+          label.className = "text-left flex-1 truncate";
           const title = shot.title?.trim() || `分镜 ${i + 1}`;
-          btn.textContent = `${i + 1}. ${title}`;
-          btn.title = title;
-          btn.addEventListener("click", () => {
+          label.textContent = `${i + 1}. ${title}`;
+          label.title = title;
+          label.addEventListener("click", () => {
             const target = document.getElementById(`shot-${shot.id}`);
             if (target)
               target.scrollIntoView({ behavior: "smooth", block: "start" });
           });
+
+          btn.appendChild(handle);
+          btn.appendChild(label);
+
+          // Drag events on TOC item
+          btn.addEventListener("dragstart", (e) => {
+            tocDragIndex = Number(e.currentTarget.dataset.index);
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", String(tocDragIndex));
+            btn.classList.add("dragging");
+          });
+
+          btn.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            btn.classList.add("drop-target");
+          });
+
+          btn.addEventListener("dragleave", () =>
+            btn.classList.remove("drop-target")
+          );
+
+          btn.addEventListener("drop", (e) => {
+            e.preventDefault();
+            btn.classList.remove("drop-target");
+            const from =
+              tocDragIndex ?? Number(e.dataTransfer.getData("text/plain"));
+            const to = Number(btn.dataset.index);
+            if (!Number.isNaN(from) && !Number.isNaN(to)) {
+              reorder(from, to);
+            }
+            tocDragIndex = null;
+          });
+
+          btn.addEventListener("dragend", () => {
+            document
+              .querySelectorAll(".toc-item")
+              .forEach((el) => el.classList.remove("dragging", "drop-target"));
+            tocDragIndex = null;
+          });
+
           tocEl.appendChild(btn);
         });
       }
@@ -388,9 +435,10 @@
       function render() {
         renderList();
         renderTOC();
+        computeStickyOffset();
       }
 
-      // --- CRUD ---
+      // CRUD
       function addShotAfter(idx) {
         const insertAt = Math.min(Math.max(idx + 1, 0), shots.length);
         const newShot = {
@@ -407,7 +455,6 @@
           if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
         });
       }
-
       function addShotToEnd() {
         addShotAfter(shots.length - 1);
       }
@@ -444,69 +491,7 @@
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
-      // --- Drag n Drop Handlers ---
-      let dragIndex = null;
-
-      function onDragStart(e) {
-        dragIndex = Number(e.currentTarget.dataset.index);
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", String(dragIndex));
-        e.currentTarget.classList.add(
-          "dragging",
-          "border-emerald-400/60",
-          "ring-2",
-          "ring-emerald-400/40"
-        );
-      }
-
-      function onDragOver(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        const overIndex = Number(e.currentTarget.dataset.index);
-        if (dragIndex !== null && dragIndex !== overIndex) {
-          e.currentTarget.classList.add(
-            "ring-1",
-            "ring-emerald-400/30",
-            "border-emerald-400/40"
-          );
-        }
-      }
-
-      function onDrop(e) {
-        e.preventDefault();
-        const from = dragIndex ?? Number(e.dataTransfer.getData("text/plain"));
-        const to = Number(e.currentTarget.dataset.index);
-        clearDragClasses();
-        if (!Number.isNaN(from) && !Number.isNaN(to)) reorder(from, to);
-        dragIndex = null;
-      }
-
-      function onDragEnd(e) {
-        clearDragClasses();
-        dragIndex = null;
-      }
-      function onDragLeave(e) {
-        e.currentTarget.classList.remove(
-          "ring-1",
-          "ring-emerald-400/30",
-          "border-emerald-400/40"
-        );
-      }
-      function clearDragClasses() {
-        document.querySelectorAll("article[draggable]").forEach((el) => {
-          el.classList.remove(
-            "dragging",
-            "border-emerald-400/60",
-            "ring-2",
-            "ring-emerald-400/40",
-            "ring-1",
-            "ring-emerald-400/30",
-            "border-emerald-400/40"
-          );
-        });
-      }
-
-      // --- Import / Export & Helpers ---
+      // Import / Export
       function showStatus(text) {
         statusEl.textContent = text;
         statusEl.classList.remove("hidden");
@@ -530,7 +515,6 @@
           type: "text/plain;charset=utf-8",
         });
 
-        // 优先使用 File System Access API（Chrome/Edge）弹出原生“保存”对话框
         if (window.showSaveFilePicker) {
           try {
             const d = new Date();
@@ -552,15 +536,12 @@
             toast("已保存导出文件。");
             return;
           } catch (err) {
-            if (err && err.name === "AbortError") {
+            if (err?.name === "AbortError") {
               toast("已取消保存。");
               return;
             }
-            // 失败则回退到 a[download]
           }
         }
-
-        // 回退：a[download]（浏览器可能直接下载或询问保存）
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         const d = new Date();
@@ -587,7 +568,7 @@
               parsed.type !== SIG.type ||
               !Array.isArray(parsed.items)
             )
-              throw new Error("导入的文件不是有效的 sd-shot-list 格式");
+              throw new Error("无效的 sd-shot-list 格式");
             let next = [];
             if (parsed.version === 2) {
               next = parsed.items.map((it) => ({
@@ -610,7 +591,7 @@
             shots = next;
             persist();
             render();
-            toast(`已导入 ${next.length} 条分镜（版本 v${parsed.version}）`);
+            toast(`已导入 ${next.length} 条分镜（v${parsed.version}）`);
           } catch (err) {
             alert(err?.message || "导入失败：无法解析文件");
           } finally {
@@ -620,7 +601,7 @@
         reader.readAsText(file);
       }
 
-      // --- Wire up header buttons ---
+      // wire up
       document
         .getElementById("btnImport")
         .addEventListener("click", () => fileInputEl.click());
@@ -638,7 +619,7 @@
         window.scrollTo({ top: 0, behavior: "smooth" })
       );
 
-      // initial render
+      // init
       render();
     </script>
   </body>
