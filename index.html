@@ -14,7 +14,6 @@
         opacity: 0.85;
       }
       @media (min-width: 1024px) {
-        /* 桌面端固定侧栏 */
         aside.toc-sticky {
           position: sticky;
           top: 1rem;
@@ -22,65 +21,76 @@
           overflow: auto;
         }
       }
+      /* 顶部工具栏吸顶 */
+      .topbar-sticky {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(6px);
+      }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100">
-    <div class="mx-auto max-w-6xl px-4 py-6 lg:py-8">
-      <!-- 顶部工具栏 -->
-      <header
-        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <h1 class="text-2xl font-semibold tracking-tight">
-          SD 分镜 Prompt 管理器
-        </h1>
-        <div class="flex flex-wrap gap-2">
-          <button
-            id="btnReset"
-            class="rounded-2xl border border-red-500/60 text-red-300 px-4 py-2 text-sm hover:bg-red-950/40 active:scale-[0.99]"
+    <div class="mx-auto max-w-6xl px-4 lg:px-6 py-0">
+      <!-- 顶部工具栏（吸顶） -->
+      <div class="topbar-sticky bg-neutral-950/80">
+        <div class="py-4 lg:py-5">
+          <header
+            class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
           >
-            重新开始
-          </button>
-          <button
-            id="btnImport"
-            class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
-          >
-            导入 TXT
-          </button>
-          <input
-            id="fileInput"
-            type="file"
-            accept=".txt,application/json,text/plain"
-            class="hidden"
-          />
-          <button
-            id="btnExport"
-            class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
-          >
-            导出 TXT
-          </button>
-          <button
-            id="btnAdd"
-            class="rounded-2xl bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white active:scale-[0.99]"
-          >
-            + 新建分镜
-          </button>
+            <h1 class="text-2xl font-semibold tracking-tight">
+              SD 分镜 Prompt 管理器
+            </h1>
+            <div class="flex flex-wrap gap-2">
+              <button
+                id="btnReset"
+                class="rounded-2xl border border-red-500/60 text-red-300 px-4 py-2 text-sm hover:bg-red-950/40 active:scale-[0.99]"
+              >
+                重新开始
+              </button>
+              <button
+                id="btnImport"
+                class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
+              >
+                导入 TXT
+              </button>
+              <input
+                id="fileInput"
+                type="file"
+                accept=".txt,application/json,text/plain"
+                class="hidden"
+              />
+              <button
+                id="btnExport"
+                class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
+              >
+                导出 TXT
+              </button>
+              <button
+                id="btnAdd"
+                class="rounded-2xl bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white active:scale-[0.99]"
+              >
+                + 新建分镜
+              </button>
+            </div>
+          </header>
+          <p
+            id="status"
+            class="mt-3 text-sm text-emerald-400 hidden"
+            role="status"
+          ></p>
         </div>
-      </header>
+      </div>
 
-      <p
-        id="status"
-        class="mt-3 text-sm text-emerald-400 hidden"
-        role="status"
-      ></p>
-
-      <div class="mt-4 text-xs text-neutral-500">
+      <div class="mt-3 text-xs text-neutral-500">
         提示：左侧目录可快速跳转到任意分镜。按住卡片空白处拖拽即可排序；支持删除；支持导入/导出。支持分别编辑
         <span class="font-semibold text-neutral-300">Positive</span> 与
-        <span class="font-semibold text-neutral-300">Negative</span> Prompt。
+        <span class="font-semibold text-neutral-300">Negative</span>
+        Prompt。右下角“↑ 回到顶部”。
       </div>
 
       <!-- 主体两栏布局 -->
-      <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[260px,1fr]">
+      <div class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[260px,1fr]">
         <!-- 侧边目录 -->
         <aside
           class="toc-sticky rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4"
@@ -118,6 +128,15 @@
           </footer>
         </main>
       </div>
+
+      <!-- 回到顶部按钮（右下角固定） -->
+      <button
+        id="btnTop"
+        title="回到顶部"
+        class="fixed bottom-5 right-5 rounded-full border border-neutral-700 bg-neutral-900/80 px-3 py-2 text-sm hover:bg-neutral-800"
+      >
+        ↑ 回到顶部
+      </button>
     </div>
 
     <script>
@@ -147,6 +166,7 @@
       const btnExport = document.getElementById("btnExport");
       const btnAdd = document.getElementById("btnAdd");
       const btnReset = document.getElementById("btnReset");
+      const btnTop = document.getElementById("btnTop");
 
       // --- Load from localStorage ---
       (function initLoad() {
@@ -251,11 +271,15 @@
 
           // Positive
           const posRow = document.createElement("div");
-          posRow.className = "mt-4 flex items-center justify-between";
-          posRow.innerHTML = `<label class="text-sm text-neutral-300">Positive Prompt</label><span class=\"text-xs text-neutral-500\">可多行</span>`;
+          posRow.className = "mt-4 flex items-center justify-between gap-2";
+          posRow.innerHTML = `
+            <div class="text-sm text-neutral-300">Positive Prompt</div>
+            <button class="btn-copy text-xs rounded-lg border border-neutral-700 px-2 py-1 hover:bg-neutral-800" data-target="pos-${shot.id}">复制</button>
+          `;
           article.appendChild(posRow);
 
           const taPos = document.createElement("textarea");
+          taPos.id = `pos-${shot.id}`;
           taPos.className =
             "mt-2 w-full resize-y rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-neutral-700";
           taPos.rows = 5;
@@ -270,11 +294,15 @@
 
           // Negative
           const negRow = document.createElement("div");
-          negRow.className = "mt-4 flex items-center justify-between";
-          negRow.innerHTML = `<label class=\"text-sm text-neutral-300\">Negative Prompt</label><span class=\"text-xs text-neutral-500\">可多行</span>`;
+          negRow.className = "mt-4 flex items-center justify-between gap-2";
+          negRow.innerHTML = `
+            <div class="text-sm text-neutral-300">Negative Prompt</div>
+            <button class="btn-copy text-xs rounded-lg border border-neutral-700 px-2 py-1 hover:bg-neutral-800" data-target="neg-${shot.id}">复制</button>
+          `;
           article.appendChild(negRow);
 
           const taNeg = document.createElement("textarea");
+          taNeg.id = `neg-${shot.id}`;
           taNeg.className =
             "mt-2 w-full resize-y rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-neutral-700";
           taNeg.rows = 5;
@@ -309,6 +337,29 @@
           header
             .querySelector(".btn-delete")
             .addEventListener("click", () => removeShot(index));
+
+          // copy buttons (delegate target)
+          article.querySelectorAll(".btn-copy").forEach((btn) => {
+            btn.addEventListener("click", async (e) => {
+              const targetId = e.currentTarget.getAttribute("data-target");
+              const ta = document.getElementById(targetId);
+              if (!ta) return;
+              const text = ta.value;
+              try {
+                if (navigator.clipboard?.writeText) {
+                  await navigator.clipboard.writeText(text);
+                } else {
+                  // fallback
+                  ta.select();
+                  document.execCommand("copy");
+                  ta.setSelectionRange(ta.value.length, ta.value.length);
+                }
+                toast(`已复制到剪贴板`);
+              } catch (err) {
+                alert("复制失败");
+              }
+            });
+          });
 
           listEl.appendChild(article);
         });
@@ -351,7 +402,6 @@
         shots.splice(insertAt, 0, newShot);
         persist();
         render();
-        // 追加后，滚动到新卡片
         requestAnimationFrame(() => {
           const el = document.getElementById(`shot-${newShot.id}`);
           if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -387,12 +437,10 @@
       }
 
       function resetAll() {
-        // 清除当前内容，仅保留一个空分镜
         shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
         persist();
         render();
-        showStatus("已重新开始，当前仅保留 1 条空白分镜。");
-        // 滚到顶部
+        toast("已重新开始，当前仅保留 1 条空白分镜。");
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
@@ -458,14 +506,17 @@
         });
       }
 
-      // --- Import / Export ---
+      // --- Import / Export & Helpers ---
       function showStatus(text) {
         statusEl.textContent = text;
         statusEl.classList.remove("hidden");
         setTimeout(() => statusEl.classList.add("hidden"), 2500);
       }
+      function toast(text) {
+        showStatus(text);
+      }
 
-      function doExport() {
+      async function doExport() {
         const payload = {
           ...SIG,
           exportedAt: new Date().toISOString(),
@@ -478,6 +529,38 @@
         const blob = new Blob([JSON.stringify(payload, null, 2)], {
           type: "text/plain;charset=utf-8",
         });
+
+        // 优先使用 File System Access API（Chrome/Edge）弹出原生“保存”对话框
+        if (window.showSaveFilePicker) {
+          try {
+            const d = new Date();
+            const stamp = `${d.getFullYear()}-${String(
+              d.getMonth() + 1
+            ).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            const handle = await window.showSaveFilePicker({
+              suggestedName: `sd-shot-list-${stamp}.txt`,
+              types: [
+                {
+                  description: "Text File",
+                  accept: { "text/plain": [".txt"] },
+                },
+              ],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            toast("已保存导出文件。");
+            return;
+          } catch (err) {
+            if (err && err.name === "AbortError") {
+              toast("已取消保存。");
+              return;
+            }
+            // 失败则回退到 a[download]
+          }
+        }
+
+        // 回退：a[download]（浏览器可能直接下载或询问保存）
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         const d = new Date();
@@ -490,7 +573,7 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
-        showStatus("已导出为 .txt（JSON v2 格式）。");
+        toast("文件已生成（某些浏览器可能直接下载）。");
       }
 
       function doImport(file) {
@@ -527,9 +610,7 @@
             shots = next;
             persist();
             render();
-            showStatus(
-              `已导入 ${next.length} 条分镜（版本 v${parsed.version}），当前内容已覆盖。`
-            );
+            toast(`已导入 ${next.length} 条分镜（版本 v${parsed.version}）`);
           } catch (err) {
             alert(err?.message || "导入失败：无法解析文件");
           } finally {
@@ -540,7 +621,9 @@
       }
 
       // --- Wire up header buttons ---
-      btnImport.addEventListener("click", () => fileInputEl.click());
+      document
+        .getElementById("btnImport")
+        .addEventListener("click", () => fileInputEl.click());
       fileInputEl.addEventListener("change", (e) => {
         const f = e.target.files?.[0];
         if (f) doImport(f);
@@ -551,6 +634,9 @@
         if (confirm("确定要重新开始吗？这会清空页面内容并只保留一个空白分镜。"))
           resetAll();
       });
+      btnTop.addEventListener("click", () =>
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      );
 
       // initial render
       render();
