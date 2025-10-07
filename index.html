@@ -7,14 +7,26 @@
     <!-- Tailwind CDN（可移除，UI 仍可用，只是没样式） -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      /* 防止拖拽时选中文本 */
+      html {
+        scroll-behavior: smooth;
+      }
       .dragging {
         opacity: 0.85;
+      }
+      @media (min-width: 1024px) {
+        /* 桌面端固定侧栏 */
+        aside.toc-sticky {
+          position: sticky;
+          top: 1rem;
+          height: calc(100vh - 2rem);
+          overflow: auto;
+        }
       }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100">
-    <main class="mx-auto max-w-4xl px-4 py-8">
+    <div class="mx-auto max-w-6xl px-4 py-6 lg:py-8">
+      <!-- 顶部工具栏 -->
       <header
         class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
       >
@@ -22,6 +34,12 @@
           SD 分镜 Prompt 管理器
         </h1>
         <div class="flex flex-wrap gap-2">
+          <button
+            id="btnReset"
+            class="rounded-2xl border border-red-500/60 text-red-300 px-4 py-2 text-sm hover:bg-red-950/40 active:scale-[0.99]"
+          >
+            重新开始
+          </button>
           <button
             id="btnImport"
             class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
@@ -56,23 +74,35 @@
       ></p>
 
       <div class="mt-4 text-xs text-neutral-500">
-        提示：按住卡片空白处拖拽即可排序；已支持删除按钮。现在可分别编辑
+        提示：左侧目录可快速跳转到任意分镜。按住卡片空白处拖拽即可排序；支持删除；支持导入/导出。支持分别编辑
         <span class="font-semibold text-neutral-300">Positive</span> 与
         <span class="font-semibold text-neutral-300">Negative</span> Prompt。
       </div>
 
-      <section id="list" class="mt-4 space-y-6"></section>
+      <!-- 主体两栏布局 -->
+      <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[260px,1fr]">
+        <!-- 侧边目录 -->
+        <aside
+          class="toc-sticky rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4"
+        >
+          <div class="mb-2 text-sm text-neutral-300">分镜目录</div>
+          <nav id="toc" class="space-y-1 text-sm"></nav>
+        </aside>
 
-      <footer
-        class="mt-10 border-t border-neutral-800 pt-4 text-xs leading-6 text-neutral-400"
-      >
-        <p>
-          导出格式说明（v2）：生成的 <code>.txt</code> 文件为 JSON
-          文本，结构如下：
-        </p>
-        <pre
-          class="mt-2 overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-950 p-3"
-        ><code>{
+        <!-- 右侧内容 -->
+        <main>
+          <section id="list" class="space-y-6"></section>
+
+          <footer
+            class="mt-10 border-t border-neutral-800 pt-4 text-xs leading-6 text-neutral-400"
+          >
+            <p>
+              导出格式说明（v2）：生成的 <code>.txt</code> 文件为 JSON
+              文本，结构如下：
+            </p>
+            <pre
+              class="mt-2 overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-950 p-3"
+            ><code>{
   "type": "sd-shot-list",
   "version": 2,
   "exportedAt": "ISO8601 时间",
@@ -81,18 +111,18 @@
     { "title": "分镜 2", "positive": "...", "negative": "..." }
   ]
 }</code></pre>
-        <p class="mt-2">
-          兼容导入旧版 v1（将旧字段 <code>prompt</code> 自动映射为
-          <code>positive</code>）。
-        </p>
-      </footer>
-    </main>
+            <p class="mt-2">
+              兼容导入旧版 v1（将旧字段 <code>prompt</code> 自动映射为
+              <code>positive</code>）。
+            </p>
+          </footer>
+        </main>
+      </div>
+    </div>
 
     <script>
       // --- Types (JSDoc for clarity) ---
-      /**
-       * @typedef {{ id:string, title:string, positive:string, negative:string }} Shot
-       */
+      /** @typedef {{ id:string, title:string, positive:string, negative:string }} Shot */
 
       // Helper for unique ids
       const uid = () =>
@@ -106,15 +136,17 @@
       const SIG = { type: "sd-shot-list", version: 2 };
 
       /** @type {Shot[]} */
-      let shots = [{ id: uid(), title: "", positive: "", negative: "" }];
+      let shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
 
       // UI refs
       const listEl = document.getElementById("list");
+      const tocEl = document.getElementById("toc");
       const statusEl = document.getElementById("status");
       const fileInputEl = document.getElementById("fileInput");
       const btnImport = document.getElementById("btnImport");
       const btnExport = document.getElementById("btnExport");
       const btnAdd = document.getElementById("btnAdd");
+      const btnReset = document.getElementById("btnReset");
 
       // --- Load from localStorage ---
       (function initLoad() {
@@ -174,8 +206,8 @@
         }
       }
 
-      // --- Rendering ---
-      function render() {
+      // --- Rendering (Content Cards) ---
+      function renderList() {
         listEl.innerHTML = "";
         shots.forEach((shot, index) => {
           const article = document.createElement("article");
@@ -183,6 +215,7 @@
             "rounded-2xl border bg-neutral-900/40 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
           article.setAttribute("draggable", "true");
           article.dataset.index = String(index);
+          article.id = `shot-${shot.id}`; // 供目录跳转
           article.title = "拖拽以重新排序";
           article.style.cursor = "grab";
 
@@ -212,6 +245,7 @@
           inputTitle.addEventListener("input", (e) => {
             shots[index].title = e.target.value;
             persist();
+            renderTOC();
           });
           article.appendChild(inputTitle);
 
@@ -280,17 +314,48 @@
         });
       }
 
+      // --- Rendering (TOC) ---
+      function renderTOC() {
+        tocEl.innerHTML = "";
+        if (!shots.length) return;
+        shots.forEach((shot, i) => {
+          const btn = document.createElement("button");
+          btn.className =
+            "w-full text-left rounded-lg px-2 py-1 hover:bg-neutral-800/60 focus:outline-none focus:ring-1 focus:ring-neutral-600";
+          const title = shot.title?.trim() || `分镜 ${i + 1}`;
+          btn.textContent = `${i + 1}. ${title}`;
+          btn.title = title;
+          btn.addEventListener("click", () => {
+            const target = document.getElementById(`shot-${shot.id}`);
+            if (target)
+              target.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+          tocEl.appendChild(btn);
+        });
+      }
+
+      function render() {
+        renderList();
+        renderTOC();
+      }
+
       // --- CRUD ---
       function addShotAfter(idx) {
         const insertAt = Math.min(Math.max(idx + 1, 0), shots.length);
-        shots.splice(insertAt, 0, {
+        const newShot = {
           id: uid(),
-          title: "",
+          title: `分镜 ${shots.length + 1}`,
           positive: "",
           negative: "",
-        });
+        };
+        shots.splice(insertAt, 0, newShot);
         persist();
         render();
+        // 追加后，滚动到新卡片
+        requestAnimationFrame(() => {
+          const el = document.getElementById(`shot-${newShot.id}`);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
       }
 
       function addShotToEnd() {
@@ -319,6 +384,16 @@
         shots = arr;
         persist();
         render();
+      }
+
+      function resetAll() {
+        // 清除当前内容，仅保留一个空分镜
+        shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
+        persist();
+        render();
+        showStatus("已重新开始，当前仅保留 1 条空白分镜。");
+        // 滚到顶部
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
       // --- Drag n Drop Handlers ---
@@ -472,6 +547,10 @@
       });
       btnExport.addEventListener("click", doExport);
       btnAdd.addEventListener("click", () => addShotToEnd());
+      btnReset.addEventListener("click", () => {
+        if (confirm("确定要重新开始吗？这会清空页面内容并只保留一个空白分镜。"))
+          resetAll();
+      });
 
       // initial render
       render();
