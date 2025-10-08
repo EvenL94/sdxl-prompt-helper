@@ -386,7 +386,9 @@
             <button class="rp-toggle rounded-xl border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800">
               <span class="rp-toggle-arrow">&gt;</span>
               <span class="ml-1 rp-status">${
-                shot.rpEnabled ? "已启用" : "未启用"
+                shot.rpEnabled
+                  ? "已启用分割"
+                  : "未启用分割"
               }</span>
             </button>
           `;
@@ -533,7 +535,7 @@
           rpToggle.addEventListener("click", () => {
             const now = !shots[index].rpEnabled;
             shots[index].rpEnabled = now;
-            rpStatus.textContent = now ? "已启用" : "未启用";
+            rpStatus.textContent = now ? "已启用分割" : "未启用分割";
             rpToggle.classList.toggle("rp-enabled", now);
             rpPanel.classList.toggle("show", now);
             persist();
