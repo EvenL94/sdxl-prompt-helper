@@ -13,7 +13,6 @@
         scroll-behavior: smooth;
       }
 
-      /* 顶部工具栏吸顶 */
       .topbar-sticky {
         position: sticky;
         top: 0;
@@ -21,7 +20,6 @@
         backdrop-filter: blur(6px);
       }
 
-      /* 目录栏固定（左栏） */
       aside.toc-sticky {
         position: sticky;
         top: calc(var(--sticky-offset) + 8px);
@@ -29,12 +27,11 @@
         overflow: auto;
       }
 
-      /* 分镜卡片在 sticky title 下对齐并留空隙 */
       article.card {
         scroll-margin-top: calc(var(--sticky-offset) + 8px);
+        position: relative;
       }
 
-      /* TOC 拖拽可视化 */
       .toc-item[draggable="true"] {
         cursor: grab;
       }
@@ -46,11 +43,76 @@
         outline-offset: 2px;
         border-radius: 8px;
       }
+      .toc-item.active {
+        background: rgba(59, 130, 246, 0.18);
+      }
+
+      .rp-toggle-arrow {
+        display: inline-block;
+        transition: transform 0.18s ease;
+      }
+      .rp-enabled .rp-toggle-arrow {
+        transform: rotate(90deg);
+      }
+
+      /* RP 面板宽度 160px（上一版的“减半”设置） */
+      .rp-panel {
+        position: absolute;
+        top: 0;
+        left: calc(100% + 12px);
+        width: 160px;
+        max-width: 80vw;
+        border: 1px solid rgb(38 38 38);
+        background: rgba(10, 10, 10, 0.95);
+        border-radius: 12px;
+        padding: 12px;
+        box-shadow: 0 4px 22px rgba(0, 0, 0, 0.45);
+        display: none;
+        z-index: 10;
+      }
+      .rp-panel.show {
+        display: block;
+      }
+      .rp-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .rp-input {
+        width: 88px;
+        padding: 4px 6px;
+        border: 1px solid rgb(38 38 38);
+        background: rgb(10 10 10);
+        border-radius: 8px;
+        font-size: 12px;
+        color: #e5e5e5;
+        outline: none;
+      }
+      .rp-input:focus {
+        border-color: rgb(82 82 82);
+      }
+
+      .index-badge {
+        position: absolute;
+        top: 8px;
+        left: 12px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #a3a3a3;
+        pointer-events: none;
+      }
+
+      .scroll-spy-anchor {
+        position: absolute;
+        top: 0;
+        height: 1px;
+        width: 1px;
+      }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100">
     <div class="mx-auto max-w-6xl px-4 lg:px-6 py-0">
-      <!-- 顶部工具栏（吸顶） -->
       <div class="topbar-sticky bg-neutral-950/80">
         <div class="py-4 lg:py-5">
           <header
@@ -101,13 +163,12 @@
       </div>
 
       <div class="mt-3 text-xs text-neutral-500">
-        提示：现在在<strong>左侧目录</strong>拖拽即可排序；点击目录会将分镜卡片对齐到顶部
-        sticky 标题下方并留空隙。
+        提示：左侧目录支持拖拽排序与自动高亮；点击目录会将分镜卡片对齐到顶部
+        sticky 标题下方并留空隙。右侧“Regional
+        Prompter”面板默认折叠，启用后向右展开。
       </div>
 
-      <!-- 主体两栏布局 -->
       <div class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[260px,1fr]">
-        <!-- 侧边目录（固定 + 可拖拽排序） -->
         <aside
           class="toc-sticky rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4"
         >
@@ -115,33 +176,37 @@
           <nav id="toc" class="space-y-1 text-sm"></nav>
         </aside>
 
-        <!-- 右侧内容 -->
         <main>
           <section id="list" class="space-y-6"></section>
 
           <footer
             class="mt-10 border-t border-neutral-800 pt-4 text-xs leading-6 text-neutral-400"
           >
-            <p>导出格式说明（v2）：生成的 <code>.txt</code> 文件为 JSON：</p>
+            <p>导出格式说明（v3）：生成的 <code>.txt</code> 文件为 JSON：</p>
             <pre
               class="mt-2 overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-950 p-3"
             ><code>{
   "type": "sd-shot-list",
-  "version": 2,
+  "version": 3,
   "exportedAt": "ISO8601",
   "items": [
-    { "title": "分镜 1", "positive": "...", "negative": "..." }
+    {
+      "title": "分镜 1",
+      "summary": "",
+      "positive": "...",
+      "negative": "...",
+      "rpEnabled": false,
+      "rpOrientation": "horizontal",
+      "rpDivideRatio": "",
+      "rpOverlayRatio": ""
+    }
   ]
 }</code></pre>
-            <p class="mt-2">
-              兼容导入旧版 v1（将旧字段 <code>prompt</code> 映射为
-              <code>positive</code>）。
-            </p>
+            <p class="mt-2">导入兼容 v1/v2（自动填充 v3 新字段）。</p>
           </footer>
         </main>
       </div>
 
-      <!-- 回到顶部按钮 -->
       <button
         id="btnTop"
         title="回到顶部"
@@ -152,18 +217,34 @@
     </div>
 
     <script>
-      /** @typedef {{ id:string, title:string, positive:string, negative:string }} Shot */
+      /** @typedef {{
+       *  id:string, title:string, summary:string, positive:string, negative:string,
+       *  rpEnabled:boolean, rpOrientation:'horizontal'|'vertical',
+       *  rpDivideRatio:string, rpOverlayRatio:string
+       * }} Shot */
       const uid = () =>
         Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+      const LS_KEY_V3 = "sd-shot-list-v3";
       const LS_KEY_V2 = "sd-shot-list-v2";
       const LS_KEY_V1 = "sd-shot-list-v1";
-      const SIG = { type: "sd-shot-list", version: 2 };
+      const SIG = { type: "sd-shot-list", version: 3 };
 
       /** @type {Shot[]} */
-      let shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
+      let shots = [
+        {
+          id: uid(),
+          title: "分镜 1",
+          summary: "",
+          positive: "",
+          negative: "",
+          rpEnabled: false,
+          rpOrientation: "horizontal",
+          rpDivideRatio: "",
+          rpOverlayRatio: "",
+        },
+      ];
 
-      // refs
       const listEl = document.getElementById("list");
       const tocEl = document.getElementById("toc");
       const statusEl = document.getElementById("status");
@@ -182,40 +263,73 @@
       }
       window.addEventListener("resize", computeStickyOffset);
 
-      // load
       (function initLoad() {
         try {
+          const rawV3 = localStorage.getItem(LS_KEY_V3);
+          if (rawV3) {
+            const parsed = JSON.parse(rawV3);
+            if (
+              parsed?.type === SIG.type &&
+              parsed?.version === 3 &&
+              Array.isArray(parsed.items)
+            ) {
+              shots = parsed.items.map((it) => ({
+                id: uid(),
+                title: String(it.title ?? ""),
+                summary: String(it.summary ?? ""),
+                positive: String(it.positive ?? ""),
+                negative: String(it.negative ?? ""),
+                rpEnabled: Boolean(it.rpEnabled ?? false),
+                rpOrientation:
+                  it.rpOrientation === "vertical" ? "vertical" : "horizontal",
+                rpDivideRatio: String(it.rpDivideRatio ?? ""),
+                rpOverlayRatio: String(it.rpOverlayRatio ?? ""),
+              }));
+              return;
+            }
+          }
           const rawV2 = localStorage.getItem(LS_KEY_V2);
           if (rawV2) {
             const parsed = JSON.parse(rawV2);
             if (
-              parsed?.type === SIG.type &&
+              parsed?.type === "sd-shot-list" &&
               parsed?.version === 2 &&
               Array.isArray(parsed.items)
             ) {
               shots = parsed.items.map((it) => ({
                 id: uid(),
                 title: String(it.title || ""),
+                summary: "",
                 positive: String(it.positive || ""),
                 negative: String(it.negative || ""),
+                rpEnabled: false,
+                rpOrientation: "horizontal",
+                rpDivideRatio: "",
+                rpOverlayRatio: "",
               }));
+              return;
             }
-          } else {
-            const rawV1 = localStorage.getItem(LS_KEY_V1);
-            if (rawV1) {
-              const parsed = JSON.parse(rawV1);
-              if (
-                parsed?.type === SIG.type &&
-                parsed?.version === 1 &&
-                Array.isArray(parsed.items)
-              ) {
-                shots = parsed.items.map((it) => ({
-                  id: uid(),
-                  title: String(it.title || ""),
-                  positive: String(it.prompt || ""),
-                  negative: "",
-                }));
-              }
+          }
+          const rawV1 = localStorage.getItem(LS_KEY_V1);
+          if (rawV1) {
+            const parsed = JSON.parse(rawV1);
+            if (
+              parsed?.type === "sd-shot-list" &&
+              parsed?.version === 1 &&
+              Array.isArray(parsed.items)
+            ) {
+              shots = parsed.items.map((it) => ({
+                id: uid(),
+                title: String(it.title || ""),
+                summary: "",
+                positive: String(it.prompt || ""),
+                negative: "",
+                rpEnabled: false,
+                rpOrientation: "horizontal",
+                rpDivideRatio: "",
+                rpOverlayRatio: "",
+              }));
+              return;
             }
           }
         } catch {}
@@ -224,37 +338,60 @@
       function persist() {
         const payload = {
           ...SIG,
-          items: shots.map(({ title, positive, negative }) => ({
-            title,
-            positive,
-            negative,
-          })),
+          items: shots.map(
+            ({
+              title,
+              summary,
+              positive,
+              negative,
+              rpEnabled,
+              rpOrientation,
+              rpDivideRatio,
+              rpOverlayRatio,
+            }) => ({
+              title,
+              summary,
+              positive,
+              negative,
+              rpEnabled,
+              rpOrientation,
+              rpDivideRatio,
+              rpOverlayRatio,
+            })
+          ),
         };
         try {
-          localStorage.setItem(LS_KEY_V2, JSON.stringify(payload));
+          localStorage.setItem(LS_KEY_V3, JSON.stringify(payload));
         } catch {}
       }
 
-      // 渲染列表（已取消卡片拖拽）
       function renderList() {
         listEl.innerHTML = "";
         shots.forEach((shot, index) => {
           const article = document.createElement("article");
           article.className =
-            "card rounded-2xl border bg-neutral-900/40 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
+            "card rounded-2xl border bg-neutral-900/40 p-4 pb-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
           article.dataset.index = String(index);
           article.id = `shot-${shot.id}`;
 
+          const indexBadge = document.createElement("div");
+          indexBadge.className = "index-badge";
+          indexBadge.textContent = `#${index + 1}`;
+          article.appendChild(indexBadge);
+
+          /* 头部右侧仅保留 RP 折叠/启用按钮（按你的要求去掉了“Title”标签） */
           const header = document.createElement("div");
-          header.className = "flex items-center justify-between gap-3";
+          header.className = "flex items-center justify-end gap-2";
           header.innerHTML = `
-            <label class="text-sm text-neutral-300">Title</label>
-            <div class="flex items-center gap-2">
-              <button class="btn-delete rounded-xl border px-2 py-1 text-xs font-medium
-                border-red-500/50 text-red-300 bg-red-600/10 hover:bg-red-600/20"
-                title="删除该分镜">删除</button>
-            </div>
+            <button class="rp-toggle rounded-xl border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800">
+              <span class="rp-toggle-arrow">&gt;</span>
+              <span class="ml-1 rp-status">${
+                shot.rpEnabled ? "已启用" : "未启用"
+              }</span>
+            </button>
           `;
+          if (shot.rpEnabled)
+            header.querySelector(".rp-toggle").classList.add("rp-enabled");
           article.appendChild(header);
 
           const inputTitle = document.createElement("input");
@@ -268,6 +405,17 @@
             renderTOC();
           });
           article.appendChild(inputTitle);
+
+          const summaryInput = document.createElement("input");
+          summaryInput.className =
+            "mt-2 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700";
+          summaryInput.placeholder = "简介：用于对本分镜进行简要说明（可选）";
+          summaryInput.value = shot.summary || "";
+          summaryInput.addEventListener("input", (e) => {
+            shots[index].summary = e.target.value;
+            persist();
+          });
+          article.appendChild(summaryInput);
 
           const posRow = document.createElement("div");
           posRow.className = "mt-4 flex items-center justify-between gap-2";
@@ -312,9 +460,9 @@
           });
           article.appendChild(taNeg);
 
+          /* 同一行：左侧“在下方添加分镜”、右侧“删除” */
           const actionRow = document.createElement("div");
-          actionRow.className =
-            "mt-4 flex flex-wrap items-center justify-between gap-3";
+          actionRow.className = "mt-4 flex items-center justify-between gap-3";
 
           const btnAddBelow = document.createElement("button");
           btnAddBelow.className =
@@ -322,19 +470,43 @@
           btnAddBelow.textContent = "+ 在下方添加分镜";
           btnAddBelow.addEventListener("click", () => addShotAfter(index));
 
-          const indexTag = document.createElement("div");
-          indexTag.className = "text-xs text-neutral-500";
-          indexTag.textContent = `#${index + 1}`;
+          const btnDelete = document.createElement("button");
+          btnDelete.className =
+            "rounded-xl border px-3 py-1.5 text-xs font-medium border-red-500/50 text-red-300 bg-red-600/10 hover:bg-red-600/20";
+          btnDelete.title = "删除该分镜";
+          btnDelete.textContent = "删除";
+          btnDelete.addEventListener("click", () => removeShot(index));
 
           actionRow.appendChild(btnAddBelow);
-          actionRow.appendChild(indexTag);
+          actionRow.appendChild(btnDelete);
           article.appendChild(actionRow);
 
-          header
-            .querySelector(".btn-delete")
-            .addEventListener("click", () => removeShot(index));
+          const rpPanel = document.createElement("div");
+          rpPanel.className = "rp-panel" + (shot.rpEnabled ? " show" : "");
+          rpPanel.innerHTML = `
+            <div class="text-sm font-medium text-neutral-200">Regional Prompter</div>
+            <div class="mt-2">
+              <button class="rp-orient rounded-lg border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800">
+                <span class="orient-text">${
+                  shot.rpOrientation === "vertical" ? "垂直" : "水平"
+                }</span>
+              </button>
+            </div>
+            <div class="rp-field">
+              <label class="text-xs text-neutral-400">Divide Ratio</label>
+              <input class="rp-input rp-divide" type="text" placeholder="1,1" value="${
+                shot.rpDivideRatio || ""
+              }">
+            </div>
+            <div class="rp-field">
+              <label class="text-xs text-neutral-400">Overlay Ratio</label>
+              <input class="rp-input rp-overlay" type="text" placeholder="0.5" value="${
+                shot.rpOverlayRatio || ""
+              }">
+            </div>
+          `;
+          article.appendChild(rpPanel);
 
-          // 复制按钮
           article.querySelectorAll(".btn-copy").forEach((btn) => {
             btn.addEventListener("click", async (e) => {
               const targetId = e.currentTarget.getAttribute("data-target");
@@ -356,26 +528,65 @@
             });
           });
 
+          const rpToggle = header.querySelector(".rp-toggle");
+          const rpStatus = header.querySelector(".rp-status");
+          rpToggle.addEventListener("click", () => {
+            const now = !shots[index].rpEnabled;
+            shots[index].rpEnabled = now;
+            rpStatus.textContent = now ? "已启用" : "未启用";
+            rpToggle.classList.toggle("rp-enabled", now);
+            rpPanel.classList.toggle("show", now);
+            persist();
+          });
+
+          rpPanel.querySelector(".rp-orient").addEventListener("click", () => {
+            shots[index].rpOrientation =
+              shots[index].rpOrientation === "horizontal"
+                ? "vertical"
+                : "horizontal";
+            rpPanel.querySelector(".orient-text").textContent =
+              shots[index].rpOrientation === "vertical" ? "垂直" : "水平";
+            persist();
+          });
+          rpPanel.querySelector(".rp-divide").addEventListener("input", (e) => {
+            shots[index].rpDivideRatio = e.target.value;
+            persist();
+          });
+          rpPanel
+            .querySelector(".rp-overlay")
+            .addEventListener("input", (e) => {
+              shots[index].rpOverlayRatio = e.target.value;
+              persist();
+            });
+
+          const anchor = document.createElement("div");
+          anchor.className = "scroll-spy-anchor";
+          article.prepend(anchor);
+
           listEl.appendChild(article);
         });
       }
 
-      // 目录渲染 + 拖拽排序
+      /* TOC + 拖拽排序 + 高亮 */
       let tocDragIndex = null;
-
-      function renderTOC() {
+      function renderTOC(activeId = null) {
+        const currentActiveId = activeId || _activeArticleId;
         tocEl.innerHTML = "";
         if (!shots.length) return;
         shots.forEach((shot, i) => {
-          const btn = document.createElement("div");
-          btn.className =
+          const row = document.createElement("div");
+          row.className =
             "toc-item w-full rounded-lg px-2 py-1 hover:bg-neutral-800/60 focus:outline-none focus:ring-1 focus:ring-neutral-600 flex items-center gap-2";
-          btn.setAttribute("draggable", "true");
-          btn.dataset.index = String(i);
+          row.setAttribute("draggable", "true");
+          row.dataset.index = String(i);
+          row.dataset.sid = shot.id;
+
+          if (currentActiveId && shot.id === currentActiveId)
+            row.classList.add("active");
 
           const handle = document.createElement("span");
           handle.className = "text-neutral-500 select-none";
-          handle.textContent = "≡"; // 简单的把手图标
+          handle.textContent = "≡";
 
           const label = document.createElement("button");
           label.className = "text-left flex-1 truncate";
@@ -384,68 +595,101 @@
           label.title = title;
           label.addEventListener("click", () => {
             const target = document.getElementById(`shot-${shot.id}`);
-            if (target)
+            if (target) {
               target.scrollIntoView({ behavior: "smooth", block: "start" });
+              setActiveArticle(shot.id);
+            }
           });
 
-          btn.appendChild(handle);
-          btn.appendChild(label);
+          row.appendChild(handle);
+          row.appendChild(label);
 
-          // Drag events on TOC item
-          btn.addEventListener("dragstart", (e) => {
+          row.addEventListener("dragstart", (e) => {
             tocDragIndex = Number(e.currentTarget.dataset.index);
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("text/plain", String(tocDragIndex));
-            btn.classList.add("dragging");
+            row.classList.add("dragging");
           });
-
-          btn.addEventListener("dragover", (e) => {
+          row.addEventListener("dragover", (e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = "move";
-            btn.classList.add("drop-target");
+            row.classList.add("drop-target");
           });
-
-          btn.addEventListener("dragleave", () =>
-            btn.classList.remove("drop-target")
+          row.addEventListener("dragleave", () =>
+            row.classList.remove("drop-target")
           );
-
-          btn.addEventListener("drop", (e) => {
+          row.addEventListener("drop", (e) => {
             e.preventDefault();
-            btn.classList.remove("drop-target");
+            row.classList.remove("drop-target");
             const from =
               tocDragIndex ?? Number(e.dataTransfer.getData("text/plain"));
-            const to = Number(btn.dataset.index);
-            if (!Number.isNaN(from) && !Number.isNaN(to)) {
-              reorder(from, to);
-            }
+            const to = Number(row.dataset.index);
+            if (!Number.isNaN(from) && !Number.isNaN(to)) reorder(from, to);
             tocDragIndex = null;
           });
-
-          btn.addEventListener("dragend", () => {
+          row.addEventListener("dragend", () => {
             document
               .querySelectorAll(".toc-item")
               .forEach((el) => el.classList.remove("dragging", "drop-target"));
             tocDragIndex = null;
           });
 
-          tocEl.appendChild(btn);
+          tocEl.appendChild(row);
         });
       }
+
+      /* 滚动高亮（Scroll Spy） */
+      let _activeArticleId = shots[0]?.id || null;
+      function setActiveArticle(id) {
+        _activeArticleId = id;
+        document.querySelectorAll(".toc-item").forEach((el) => {
+          el.classList.toggle("active", el.dataset.sid === id);
+        });
+      }
+
+      let spyTicking = false;
+      function onScrollSpy() {
+        if (spyTicking) return;
+        spyTicking = true;
+        requestAnimationFrame(() => {
+          const topbar = document.querySelector(".topbar-sticky");
+          const topOffset = (topbar?.offsetHeight || 0) + 12;
+          const articles = Array.from(
+            document.querySelectorAll("article.card")
+          );
+          let best = { id: null, d: Infinity };
+          articles.forEach((a) => {
+            const rect = a.getBoundingClientRect();
+            const d = Math.abs(rect.top - topOffset);
+            if (rect.bottom < topOffset) return;
+            if (d < best.d) best = { id: a.id.replace("shot-", ""), d };
+          });
+          if (best.id && best.id !== _activeArticleId)
+            setActiveArticle(best.id);
+          spyTicking = false;
+        });
+      }
+      window.addEventListener("scroll", onScrollSpy, { passive: true });
 
       function render() {
         renderList();
         renderTOC();
         computeStickyOffset();
+        setTimeout(() => onScrollSpy(), 0);
       }
 
-      // CRUD
       function addShotAfter(idx) {
         const insertAt = Math.min(Math.max(idx + 1, 0), shots.length);
         const newShot = {
           id: uid(),
           title: `分镜 ${shots.length + 1}`,
+          summary: "",
           positive: "",
           negative: "",
+          rpEnabled: false,
+          rpOrientation: "horizontal",
+          rpDivideRatio: "",
+          rpOverlayRatio: "",
         };
         shots.splice(insertAt, 0, newShot);
         persist();
@@ -461,9 +705,12 @@
 
       function removeShot(idx) {
         if (shots.length <= 1) return;
+        const removedId = shots[idx].id;
         shots = shots.filter((_, i) => i !== idx);
         persist();
         render();
+        if (_activeArticleId === removedId)
+          setActiveArticle(shots[Math.min(idx, shots.length - 1)]?.id || null);
       }
 
       function reorder(from, to) {
@@ -484,14 +731,25 @@
       }
 
       function resetAll() {
-        shots = [{ id: uid(), title: "分镜 1", positive: "", negative: "" }];
+        shots = [
+          {
+            id: uid(),
+            title: "分镜 1",
+            summary: "",
+            positive: "",
+            negative: "",
+            rpEnabled: false,
+            rpOrientation: "horizontal",
+            rpDivideRatio: "",
+            rpOverlayRatio: "",
+          },
+        ];
         persist();
         render();
         toast("已重新开始，当前仅保留 1 条空白分镜。");
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
-      // Import / Export
       function showStatus(text) {
         statusEl.textContent = text;
         statusEl.classList.remove("hidden");
@@ -505,11 +763,27 @@
         const payload = {
           ...SIG,
           exportedAt: new Date().toISOString(),
-          items: shots.map(({ title, positive, negative }) => ({
-            title,
-            positive,
-            negative,
-          })),
+          items: shots.map(
+            ({
+              title,
+              summary,
+              positive,
+              negative,
+              rpEnabled,
+              rpOrientation,
+              rpDivideRatio,
+              rpOverlayRatio,
+            }) => ({
+              title,
+              summary,
+              positive,
+              negative,
+              rpEnabled,
+              rpOrientation,
+              rpDivideRatio,
+              rpOverlayRatio,
+            })
+          ),
         };
         const blob = new Blob([JSON.stringify(payload, null, 2)], {
           type: "text/plain;charset=utf-8",
@@ -565,24 +839,48 @@
             const parsed = JSON.parse(text);
             if (
               !parsed ||
-              parsed.type !== SIG.type ||
+              parsed.type !== "sd-shot-list" ||
               !Array.isArray(parsed.items)
             )
               throw new Error("无效的 sd-shot-list 格式");
+
             let next = [];
-            if (parsed.version === 2) {
+            if (parsed.version === 3) {
+              next = parsed.items.map((it) => ({
+                id: uid(),
+                title: String(it.title ?? ""),
+                summary: String(it.summary ?? ""),
+                positive: String(it.positive ?? ""),
+                negative: String(it.negative ?? ""),
+                rpEnabled: Boolean(it.rpEnabled ?? false),
+                rpOrientation:
+                  it.rpOrientation === "vertical" ? "vertical" : "horizontal",
+                rpDivideRatio: String(it.rpDivideRatio ?? ""),
+                rpOverlayRatio: String(it.rpOverlayRatio ?? ""),
+              }));
+            } else if (parsed.version === 2) {
               next = parsed.items.map((it) => ({
                 id: uid(),
                 title: String(it.title || ""),
+                summary: "",
                 positive: String(it.positive || ""),
                 negative: String(it.negative || ""),
+                rpEnabled: false,
+                rpOrientation: "horizontal",
+                rpDivideRatio: "",
+                rpOverlayRatio: "",
               }));
             } else if (parsed.version === 1) {
               next = parsed.items.map((it) => ({
                 id: uid(),
                 title: String(it.title || ""),
+                summary: "",
                 positive: String(it.prompt || ""),
                 negative: "",
+                rpEnabled: false,
+                rpOrientation: "horizontal",
+                rpDivideRatio: "",
+                rpOverlayRatio: "",
               }));
             } else {
               throw new Error("不支持的版本号");
@@ -591,7 +889,7 @@
             shots = next;
             persist();
             render();
-            toast(`已导入 ${next.length} 条分镜（v${parsed.version}）`);
+            toast(`已导入 ${next.length} 条分镜（v${parsed.version} → v3）`);
           } catch (err) {
             alert(err?.message || "导入失败：无法解析文件");
           } finally {
@@ -601,7 +899,6 @@
         reader.readAsText(file);
       }
 
-      // wire up
       document
         .getElementById("btnImport")
         .addEventListener("click", () => fileInputEl.click());
@@ -619,7 +916,6 @@
         window.scrollTo({ top: 0, behavior: "smooth" })
       );
 
-      // init
       render();
     </script>
   </body>
