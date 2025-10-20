@@ -444,7 +444,8 @@
           const inputTitle = document.createElement("input");
           inputTitle.className =
             "mt-2 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700";
-          inputTitle.placeholder = "例如：镜头切入主角面部";
+          inputTitle.setAttribute("data-role", "title");
+          inputTitle.placeholder = `分镜 ${index + 1}`;
           inputTitle.value = shot.title;
           inputTitle.addEventListener("input", (e) => {
             shots[index].title = e.target.value;
@@ -739,7 +740,7 @@
         const insertAt = Math.min(Math.max(idx + 1, 0), shots.length);
         const newShot = {
           id: uid(),
-          title: `分镜 ${shots.length + 1}`,
+          title: "",
           summary: "",
           positive: "",
           negative: "",
@@ -753,7 +754,14 @@
         render();
         requestAnimationFrame(() => {
           const el = document.getElementById(`shot-${newShot.id}`);
-          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+            const titleInput = el.querySelector('input[data-role="title"]');
+            if (titleInput) {
+              titleInput.focus();
+              titleInput.select();
+            }
+          }
         });
       }
       function addShotToEnd() {
@@ -788,6 +796,10 @@
       }
 
       function resetAll() {
+        // 也清空全局大标题输入框
+        sceneTitle = "";
+        if (typeof sceneTitleInput !== "undefined" && sceneTitleInput)
+          sceneTitleInput.value = "";
         shots = [
           {
             id: uid(),
