@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SD 分镜 Prompt 阅览器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root {
+        --sticky-offset: 80px;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      .topbar-sticky {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(6px);
+      }
+      aside.toc-sticky {
+        position: sticky;
+        top: calc(var(--sticky-offset) + 8px);
+        height: calc(100vh - var(--sticky-offset) - 16px);
+        overflow: auto;
+      }
+      article.card {
+        scroll-margin-top: calc(var(--sticky-offset) + 8px);
+        position: relative;
+      }
+      .toc-item.active {
+        background: rgba(59, 130, 246, 0.18);
+      }
+      .index-badge {
+        position: absolute;
+        top: 8px;
+        left: 12px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #a3a3a3;
+        pointer-events: none;
+      }
+      .scroll-spy-anchor {
+        position: absolute;
+        top: 0;
+        height: 1px;
+        width: 1px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        border: 1px solid rgb(38 38 38);
+        padding: 0.125rem 0.5rem;
+        border-radius: 0.5rem;
+        font-size: 0.75rem;
+        color: #d4d4d4;
+        background: rgba(10, 10, 10, 0.7);
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-neutral-950 text-neutral-100">
+    <div class="mx-auto max-w-6xl px-4 lg:px-6 py-0">
+      <!-- 顶部栏 -->
+      <div class="topbar-sticky bg-neutral-950/80">
+        <div class="py-4 lg:py-5">
+          <header
+            class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="flex min-w-0 flex-col">
+              <h1 class="text-2xl font-semibold tracking-tight truncate">
+                SD 分镜 Prompt 阅览器
+              </h1>
+              <div
+                id="sceneTitleTop"
+                class="text-sm text-neutral-400 hidden"
+              ></div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                id="btnImport"
+                class="rounded-2xl border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 active:scale-[0.99]"
+              >
+                导入 TXT
+              </button>
+              <input
+                id="fileInput"
+                type="file"
+                accept=".txt,application/json,text/plain"
+                class="hidden"
+              />
+            </div>
+          </header>
+          <p
+            id="status"
+            class="mt-3 text-sm text-emerald-400 hidden"
+            role="status"
+          ></p>
+        </div>
+      </div>
+
+      <div class="mt-3 text-xs text-neutral-500">
+        仅用于阅览现有 <code>.txt</code> 文件；不写入
+        LocalStorage，刷新即重置。左侧目录支持点击定位。
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[260px,1fr]">
+        <!-- 目录（仅点击定位，无拖拽） -->
+        <aside
+          class="toc-sticky rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4"
+        >
+          <div class="mb-2 text-sm text-neutral-300">分镜目录</div>
+          <nav id="toc" class="space-y-1 text-sm"></nav>
+        </aside>
+
+        <!-- 内容区 -->
+        <main>
+          <section id="list" class="space-y-6"></section>
+          <footer
+            class="mt-10 border-t border-neutral-800 pt-4 text-xs leading-6 text-neutral-400"
+          >
+            <p>
+              提示：支持 v1 / v2 / v3 导入，内部自动转换为 v3 结构进行展示。
+            </p>
+          </footer>
+        </main>
+      </div>
+
+      <button
+        id="btnTop"
+        title="回到顶部"
+        class="fixed bottom-5 right-5 rounded-full border border-neutral-700 bg-neutral-900/80 px-3 py-2 text-sm hover:bg-neutral-800"
+      >
+        ↑ 回到顶部
+      </button>
+    </div>
+
+    <script>
+      /**
+       * 兼容 index.html 的导入格式：
+       * v3: { type:'sd-shot-list', version:3, sceneTitle, items:[{ title, summary, positive, negative, rpEnabled, rpOrientation, rpDivideRatio, rpOverlayRatio }] }
+       * v2: { type:'sd-shot-list', version:2, items:[{ title, positive }] }
+       * v1: { type:'sd-shot-list', version:1, items:[{ title, prompt }] }
+       * 本页不使用 LocalStorage；刷新即清空。
+       */
+
+      const uid = () =>
+        Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+      /** @type {{sceneTitle:string, items:any[]}|null} */
+      let currentDoc = null;
+
+      // refs
+      const listEl = document.getElementById("list");
+      const tocEl = document.getElementById("toc");
+      const statusEl = document.getElementById("status");
+      const fileInputEl = document.getElementById("fileInput");
+      const btnImport = document.getElementById("btnImport");
+      const btnTop = document.getElementById("btnTop");
+      const sceneTitleTop = document.getElementById("sceneTitleTop");
+
+      function computeStickyOffset() {
+        const topbar = document.querySelector(".topbar-sticky");
+        const extraGap = 12;
+        const h = (topbar?.offsetHeight || 0) + extraGap;
+        document.documentElement.style.setProperty("--sticky-offset", h + "px");
+      }
+      window.addEventListener("resize", computeStickyOffset);
+
+      function toast(txt) {
+        statusEl.textContent = txt;
+        statusEl.classList.remove("hidden");
+        setTimeout(() => statusEl.classList.add("hidden"), 2200);
+      }
+
+      function normalizeToV3(parsed) {
+        if (
+          !parsed ||
+          parsed.type !== "sd-shot-list" ||
+          !Array.isArray(parsed.items)
+        )
+          throw new Error("无效的 sd-shot-list 格式");
+        const v = Number(parsed.version || 3);
+        let items = [];
+        if (v === 3) {
+          items = parsed.items.map((it) => ({
+            id: uid(),
+            title: String(it.title ?? ""),
+            summary: String(it.summary ?? ""),
+            positive: String(it.positive ?? ""),
+            negative: String(it.negative ?? ""),
+            rpEnabled: Boolean(it.rpEnabled ?? false),
+            rpOrientation:
+              it.rpOrientation === "horizontal" ||
+              it.rpOrientation === "vertical"
+                ? it.rpOrientation
+                : "vertical",
+            rpDivideRatio: String(it.rpDivideRatio ?? ""),
+            rpOverlayRatio: String(it.rpOverlayRatio ?? ""),
+          }));
+        } else if (v === 2) {
+          items = parsed.items.map((it) => ({
+            id: uid(),
+            title: String(it.title || ""),
+            summary: "",
+            positive: String(it.positive || ""),
+            negative: "",
+            rpEnabled: false,
+            rpOrientation: "vertical",
+            rpDivideRatio: "",
+            rpOverlayRatio: "",
+          }));
+        } else if (v === 1) {
+          items = parsed.items.map((it) => ({
+            id: uid(),
+            title: String(it.title || ""),
+            summary: "",
+            positive: String(it.prompt || ""),
+            negative: "",
+            rpEnabled: false,
+            rpOrientation: "vertical",
+            rpDivideRatio: "",
+            rpOverlayRatio: "",
+          }));
+        } else {
+          throw new Error("不支持的版本号");
+        }
+        return { sceneTitle: String(parsed.sceneTitle ?? ""), items };
+      }
+
+      function render() {
+        // 顶部标题（并入主标题区）
+        if (currentDoc && currentDoc.sceneTitle) {
+          sceneTitleTop.textContent = currentDoc.sceneTitle;
+          sceneTitleTop.classList.remove("hidden");
+        } else {
+          sceneTitleTop.textContent = "";
+          sceneTitleTop.classList.add("hidden");
+        }
+
+        // 内容
+        listEl.innerHTML = "";
+        tocEl.innerHTML = "";
+        const items = currentDoc?.items || [];
+        items.forEach((shot, index) => {
+          const article = document.createElement("article");
+          article.className =
+            "card rounded-2xl border bg-neutral-900/40 p-4 pb-4 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition-all border-neutral-800";
+          article.id = `shot-${shot.id}`;
+          article.dataset.index = String(index);
+
+          const indexBadge = document.createElement("div");
+          indexBadge.className = "index-badge";
+          indexBadge.textContent = `#${index + 1}`;
+          article.appendChild(indexBadge);
+
+          const anchor = document.createElement("div");
+          anchor.className = "scroll-spy-anchor";
+          article.prepend(anchor);
+
+          // 标题 + 简介（只读）
+          const titleRow = document.createElement("div");
+          titleRow.className =
+            "flex items-start justify-between gap-2 pl-10 sm:pl-12";
+          const titleEl = document.createElement("h3");
+          titleEl.className = "text-lg font-medium";
+          titleEl.textContent = shot.title?.trim() || `分镜 ${index + 1}`;
+          titleRow.appendChild(titleEl);
+
+          const rightBadges = document.createElement("div");
+          rightBadges.className = "flex items-center gap-2";
+          if (shot.rpEnabled) {
+            const b = document.createElement("span");
+            b.className = "badge";
+            b.innerHTML = `<span>RP</span><span class="opacity-70">${
+              shot.rpOrientation === "vertical" ? "垂直" : "水平"
+            }</span>`;
+            rightBadges.appendChild(b);
+          }
+          if (shot.rpDivideRatio) {
+            const b = document.createElement("span");
+            b.className = "badge";
+            b.textContent = `Divide ${shot.rpDivideRatio}`;
+            rightBadges.appendChild(b);
+          }
+          if (shot.rpOverlayRatio) {
+            const b = document.createElement("span");
+            b.className = "badge";
+            b.textContent = `Overlay ${shot.rpOverlayRatio}`;
+            rightBadges.appendChild(b);
+          }
+          titleRow.appendChild(rightBadges);
+          article.appendChild(titleRow);
+
+          if (shot.summary) {
+            const sum = document.createElement("p");
+            sum.className = "mt-1 text-sm text-neutral-300";
+            sum.textContent = shot.summary;
+            article.appendChild(sum);
+          }
+
+          // Positive
+          const posRow = document.createElement("div");
+          posRow.className = "mt-4 flex items-center justify-between gap-2";
+          posRow.innerHTML = `<div class="text-sm text-neutral-300">Positive Prompt</div>
+            <button class="btn-copy text-xs rounded-lg border border-neutral-700 px-2 py-1 hover:bg-neutral-800" data-target="pos-${shot.id}">复制</button>`;
+          article.appendChild(posRow);
+
+          const taPos = document.createElement("textarea");
+          taPos.id = `pos-${shot.id}`;
+          taPos.className =
+            "mt-2 w-full resize-y rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-neutral-700";
+          taPos.rows = 5;
+          taPos.readOnly = true;
+          taPos.value = shot.positive || "";
+          article.appendChild(taPos);
+
+          // Negative
+          const negRow = document.createElement("div");
+          negRow.className = "mt-4 flex items-center justify-between gap-2";
+          negRow.innerHTML = `<div class="text-sm text-neutral-300">Negative Prompt</div>
+            <button class="btn-copy text-xs rounded-lg border border-neutral-700 px-2 py-1 hover:bg-neutral-800" data-target="neg-${shot.id}">复制</button>`;
+          article.appendChild(negRow);
+
+          const taNeg = document.createElement("textarea");
+          taNeg.id = `neg-${shot.id}`;
+          taNeg.className =
+            "mt-2 w-full resize-y rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-6 outline-none focus:ring-2 focus:ring-neutral-700";
+          taNeg.rows = 5;
+          taNeg.readOnly = true;
+          taNeg.value = shot.negative || "";
+          article.appendChild(taNeg);
+
+          listEl.appendChild(article);
+
+          // 目录项
+          const tocItem = document.createElement("button");
+          tocItem.className =
+            "toc-item w-full rounded-lg px-2 py-1 hover:bg-neutral-800/60 text-left";
+          tocItem.textContent = `${index + 1}. ${
+            shot.title?.trim() || `分镜 ${index + 1}`
+          }`;
+          tocItem.addEventListener("click", () => {
+            document
+              .getElementById(`shot-${shot.id}`)
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            setActiveArticle(shot.id);
+          });
+          tocItem.dataset.sid = shot.id;
+          tocEl.appendChild(tocItem);
+        });
+
+        computeStickyOffset();
+        setTimeout(() => onScrollSpy(), 0);
+      }
+
+      // 复制功能（与 index.html 一致体验）
+      document.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".btn-copy");
+        if (!btn) return;
+        const targetId = btn.getAttribute("data-target");
+        const ta = document.getElementById(targetId);
+        if (!ta) return;
+        const text = ta.value;
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            ta.select();
+            document.execCommand("copy");
+            ta.setSelectionRange(ta.value.length, ta.value.length);
+          }
+          toast("已复制到剪贴板");
+        } catch {
+          alert("复制失败");
+        }
+      });
+
+      // Scroll Spy（仅高亮当前分镜，目录点击可定位）
+      let _activeArticleId = null;
+      function setActiveArticle(id) {
+        _activeArticleId = id;
+        document.querySelectorAll(".toc-item").forEach((el) => {
+          el.classList.toggle("active", el.dataset.sid === id);
+        });
+      }
+      let spyTicking = false;
+      function onScrollSpy() {
+        if (spyTicking) return;
+        spyTicking = true;
+        requestAnimationFrame(() => {
+          const topbar = document.querySelector(".topbar-sticky");
+          const topOffset = (topbar?.offsetHeight || 0) + 12;
+          const articles = Array.from(
+            document.querySelectorAll("article.card")
+          );
+          let best = { id: null, d: Infinity };
+          articles.forEach((a) => {
+            const rect = a.getBoundingClientRect();
+            const d = Math.abs(rect.top - topOffset);
+            if (rect.bottom < topOffset) return;
+            if (d < best.d) best = { id: a.id.replace("shot-", ""), d };
+          });
+          if (best.id && best.id !== _activeArticleId)
+            setActiveArticle(best.id);
+          spyTicking = false;
+        });
+      }
+      window.addEventListener("scroll", onScrollSpy, { passive: true });
+
+      // 导入流程
+      function doImport(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = JSON.parse(String(reader.result || ""));
+            currentDoc = normalizeToV3(parsed);
+            render();
+            toast(`已导入 ${currentDoc.items.length} 条分镜`);
+          } catch (err) {
+            alert(err?.message || "导入失败：无法解析文件");
+          } finally {
+            fileInputEl.value = "";
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      btnImport.addEventListener("click", () => fileInputEl.click());
+      fileInputEl.addEventListener("change", (e) => {
+        const f = e.target.files?.[0];
+        if (f) doImport(f);
+      });
+      btnTop.addEventListener("click", () =>
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      );
+
+      // 初始渲染（空态）
+      render();
+    </script>
+  </body>
+</html>
